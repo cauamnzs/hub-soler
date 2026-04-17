@@ -16,7 +16,8 @@ import {
 import { cn } from "@/lib/utils";
 import { buildSkuPreview } from "@/lib/sku";
 import { useToast } from "@/components/ui/toast";
-import { createInventoryEntry } from "./actions";
+import { createInventoryEntry, updateInventoryBatch, deleteInventoryBatch } from "./actions";
+import { Pencil, Trash2 } from "lucide-react";
 import type { Category, Trip, InventoryStockRow } from "@/types/database";
 
 // ============================================================
@@ -69,6 +70,208 @@ function StockIndicator({ qty }: { qty: number }) {
     </span>
   );
 }
+
+// ============================================================
+// EDIT BATCH BUTTON + MODAL
+// ============================================================
+
+function EditBatchButton({ row }: { row: InventoryStockRow }) {
+  const { toast } = useToast();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [form, setForm] = useState({
+    qty_purchased: row.qty_purchased.toString(),
+    qty_lost_seized: row.qty_lost.toString(),
+    purchase_price_usd: row.purchase_price_usd.toString(),
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.set("qty_purchased", form.qty_purchased);
+    fd.set("qty_lost_seized", form.qty_lost_seized);
+    fd.set("purchase_price_usd", form.purchase_price_usd);
+
+    startTransition(async () => {
+      const result = await updateInventoryBatch(row.id, fd);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao atualizar", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Lote atualizado!", description: "Custo da viagem recalculado." });
+        setIsOpen(false);
+      }
+    });
+  }
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="rounded-full p-1 text-muted-foreground hover:bg-muted transition-colors"
+        title="Editar lote"
+      >
+        <Pencil size={14} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Editar Lote</h2>
+            <p className="text-xs text-muted-foreground">{row.name} ({row.sku})</p>
+          </div>
+          <button onClick={() => setIsOpen(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Qtd. Comprada</label>
+              <input
+                type="number"
+                min="1"
+                value={form.qty_purchased}
+                onChange={(e) => setForm({ ...form, qty_purchased: e.target.value })}
+                className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm"
+                required
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Qtd. Avariada</label>
+              <input
+                type="number"
+                min="0"
+                value={form.qty_lost_seized}
+                onChange={(e) => setForm({ ...form, qty_lost_seized: e.target.value })}
+                className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Preço de Compra (USD)</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.purchase_price_usd}
+                onChange={(e) => setForm({ ...form, purchase_price_usd: e.target.value })}
+                className="w-full rounded-lg border border-border bg-muted/50 py-2 pl-9 pr-3 text-sm"
+                required
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className={cn(
+                "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+                isPending ? "bg-muted text-muted-foreground" : "bg-foreground text-background hover:opacity-90"
+              )}
+            >
+              {isPending ? "Salvando..." : "Salvar"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// DELETE BATCH BUTTON + MODAL
+// ============================================================
+
+function DeleteBatchButton({ row }: { row: InventoryStockRow }) {
+  const { toast } = useToast();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  function handleDelete() {
+    startTransition(async () => {
+      const result = await deleteInventoryBatch(row.id);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao excluir", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Lote excluído!", description: "Custo da viagem recalculado." });
+        setIsOpen(false);
+      }
+    });
+  }
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="rounded-full p-1 text-destructive hover:bg-destructive/10 transition-colors"
+        title="Excluir lote"
+      >
+        <Trash2 size={14} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="rounded-full bg-destructive/10 p-2">
+            <Trash2 size={20} className="text-destructive" />
+          </div>
+          <h2 className="text-base font-semibold">Confirmar Exclusão</h2>
+        </div>
+
+        <p className="mb-6 text-sm text-muted-foreground">
+          Excluir lote de <strong>{row.name}</strong>?
+          <br />
+          <span className="text-xs">
+            SKU: {row.sku} • Qtd: {row.qty_purchased} unidades
+          </span>
+        </p>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => setIsOpen(false)}
+            className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={isPending}
+            className={cn(
+              "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+              isPending ? "bg-muted text-muted-foreground" : "bg-destructive text-white hover:opacity-90"
+            )}
+          >
+            {isPending ? "Excluindo..." : "Excluir"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// SORT HEADER
+// ============================================================
 
 function SortHeader({
   label,
@@ -682,6 +885,9 @@ export function InventoryClient({
                     Viagem de Origem
                   </th>
                   <SortHeader label="Estoque Válido" sortKey="qty_valid" current={sortKey} dir={sortDir} onSort={handleSort} align="right" />
+                  <th className="px-5 py-3 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Ações
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -711,6 +917,12 @@ export function InventoryClient({
                     </td>
                     <td className="px-5 py-3.5 text-right">
                       <StockIndicator qty={row.qty_valid} />
+                    </td>
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center justify-end gap-1">
+                        <EditBatchButton row={row} />
+                        <DeleteBatchButton row={row} />
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -171,8 +171,10 @@ export type InventoryStockRow = {
   trip_name: string | null;
   trip_status: Trip["status"] | null;
   qty_purchased: number;
+  qty_lost: number;  // Alias for qty_lost_seized para compatibilidade com UI
   qty_lost_seized: number;
   qty_valid: number;
+  purchase_price_usd: number;
   batch_status: InventoryBatch["status"];
 };
 

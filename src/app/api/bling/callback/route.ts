@@ -22,13 +22,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // Handle OAuth errors from Bling
   if (error) {
     return NextResponse.redirect(
-      `/integrations?error=${encodeURIComponent(errorDescription || error)}`
+      new URL(`/integrations?error=${encodeURIComponent(errorDescription || error)}`, request.url)
     );
   }
 
   if (!code) {
     return NextResponse.redirect(
-      `/integrations?error=${encodeURIComponent("Authorization code not provided")}`
+      new URL(`/integrations?error=${encodeURIComponent("Authorization code not provided")}`, request.url)
     );
   }
 
@@ -37,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(
-      `/integrations?error=${encodeURIComponent("Bling credentials not configured")}`
+      new URL(`/integrations?error=${encodeURIComponent("Bling credentials not configured")}`, request.url)
     );
   }
 
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
                            `Token exchange failed: ${tokenResponse.status}`;
       
       return NextResponse.redirect(
-        `/integrations?error=${encodeURIComponent(errorMessage)}`
+        new URL(`/integrations?error=${encodeURIComponent(errorMessage)}`, request.url)
       );
     }
 
@@ -90,18 +90,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (dbError) {
       console.error("Failed to store Bling tokens:", dbError);
       return NextResponse.redirect(
-        `/integrations?error=${encodeURIComponent("Failed to save tokens")}`
+        new URL(`/integrations?error=${encodeURIComponent("Failed to save tokens")}`, request.url)
       );
     }
 
     // Success! Redirect to integrations page
-    return NextResponse.redirect(`/integrations?success=true`);
+    return NextResponse.redirect(new URL(`/integrations?success=true`, request.url));
 
   } catch (err) {
     console.error("Bling OAuth callback error:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.redirect(
-      `/integrations?error=${encodeURIComponent(message)}`
+      new URL(`/integrations?error=${encodeURIComponent(message)}`, request.url)
     );
   }
 }

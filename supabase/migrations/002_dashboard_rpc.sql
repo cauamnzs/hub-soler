@@ -44,6 +44,7 @@ BEGIN
       sum(ib.qty_valid)                                           AS total_items,
       sum(
         ib.purchase_price_usd
+        * ib.qty_purchased
         * coalesce(t2.final_exchange_rate, t2.estimated_exchange_rate)
       )                                                           AS total_invested_brl,
       avg(ib.margin_deviation_pct)                               AS avg_margin_pct
@@ -105,7 +106,7 @@ BEGIN
   RETURN QUERY
   SELECT
     coalesce(
-      sum(ib.purchase_price_usd * coalesce(t.final_exchange_rate, t.estimated_exchange_rate)),
+      sum(ib.purchase_price_usd * ib.qty_purchased * coalesce(t.final_exchange_rate, t.estimated_exchange_rate)),
       0
     )                                                            AS total_invested_brl,
     coalesce(
@@ -118,13 +119,13 @@ BEGIN
       0
     )                                                            AS net_profit_brl,
     CASE
-      WHEN sum(ib.purchase_price_usd * coalesce(t.final_exchange_rate, t.estimated_exchange_rate)) > 0
+      WHEN sum(ib.purchase_price_usd * ib.qty_purchased * coalesce(t.final_exchange_rate, t.estimated_exchange_rate)) > 0
       THEN (
         (
           coalesce(sum(ib.final_price_brl * ib.qty_valid), 0)
-          - sum(ib.purchase_price_usd * coalesce(t.final_exchange_rate, t.estimated_exchange_rate))
+          - sum(ib.purchase_price_usd * ib.qty_purchased * coalesce(t.final_exchange_rate, t.estimated_exchange_rate))
         )
-        / sum(ib.purchase_price_usd * coalesce(t.final_exchange_rate, t.estimated_exchange_rate))
+        / sum(ib.purchase_price_usd * ib.qty_purchased * coalesce(t.final_exchange_rate, t.estimated_exchange_rate))
       ) * 100
       ELSE 0
     END                                                          AS roi_pct

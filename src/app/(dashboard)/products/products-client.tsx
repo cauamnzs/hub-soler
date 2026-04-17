@@ -16,7 +16,8 @@ import {
 import { cn, formatDate } from "@/lib/utils";
 import { buildSkuPreview } from "@/lib/sku";
 import { useToast } from "@/components/ui/toast";
-import { createProduct, toggleProductActive } from "./actions";
+import { createProduct, toggleProductActive, updateProduct, deleteProduct } from "./actions";
+import { Pencil, Trash2 } from "lucide-react";
 import type { ProductWithCategory, Category } from "@/types/database";
 
 // ============================================================
@@ -588,6 +589,219 @@ function ToggleActiveButton({ sku, isActive }: { sku: string; isActive: boolean 
 }
 
 // ============================================================
+// EDIT PRODUCT BUTTON + MODAL
+// ============================================================
+
+function EditProductButton({ 
+  product, 
+  categories 
+}: { 
+  product: ProductWithCategory; 
+  categories: Category[];
+}) {
+  const { toast } = useToast();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [form, setForm] = useState({
+    name: product.name,
+    brand: product.brand || "",
+    category_id: product.category_id,
+    base_markup: product.base_markup.toString(),
+  });
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const fd = new FormData();
+    fd.set("name", form.name);
+    fd.set("brand", form.brand);
+    fd.set("category_id", form.category_id);
+    fd.set("base_markup", form.base_markup);
+
+    startTransition(async () => {
+      const result = await updateProduct(product.sku, fd);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao atualizar", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Produto atualizado!" });
+        setIsOpen(false);
+      }
+    });
+  }
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="rounded-full p-1 text-muted-foreground hover:bg-muted transition-colors"
+        title="Editar produto"
+      >
+        <Pencil size={16} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
+      <div className="relative z-10 w-full max-w-md rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <h2 className="text-base font-semibold">Editar Produto</h2>
+          <button onClick={() => setIsOpen(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Nome</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm"
+              required
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Marca</label>
+            <input
+              type="text"
+              value={form.brand}
+              onChange={(e) => setForm({ ...form, brand: e.target.value })}
+              className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Categoria</label>
+            <select
+              value={form.category_id}
+              onChange={(e) => setForm({ ...form, category_id: e.target.value })}
+              className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm"
+              required
+            >
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>{cat.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Markup Base (%)</label>
+            <input
+              type="number"
+              step="0.1"
+              value={form.base_markup}
+              onChange={(e) => setForm({ ...form, base_markup: e.target.value })}
+              className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm"
+              required
+            />
+          </div>
+
+          <div className="mt-6 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setIsOpen(false)}
+              className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className={cn(
+                "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+                isPending ? "bg-muted text-muted-foreground" : "bg-foreground text-background hover:opacity-90"
+              )}
+            >
+              {isPending ? "Salvando..." : "Salvar"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// DELETE PRODUCT BUTTON + MODAL
+// ============================================================
+
+function DeleteProductButton({ sku, name }: { sku: string; name: string }) {
+  const { toast } = useToast();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  function handleDelete() {
+    startTransition(async () => {
+      const result = await deleteProduct(sku);
+      if ("error" in result) {
+        toast({
+          variant: "error",
+          title: "Não foi possível excluir",
+          description: result.error,
+        });
+        setIsOpen(false);
+      } else {
+        toast({ variant: "success", title: "Produto excluído!" });
+        setIsOpen(false);
+      }
+    });
+  }
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="rounded-full p-1 text-destructive hover:bg-destructive/10 transition-colors"
+        title="Excluir produto"
+      >
+        <Trash2 size={16} />
+      </button>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
+      <div className="relative z-10 w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="rounded-full bg-destructive/10 p-2">
+            <Trash2 size={20} className="text-destructive" />
+          </div>
+          <h2 className="text-base font-semibold">Confirmar Exclusão</h2>
+        </div>
+
+        <p className="mb-6 text-sm text-muted-foreground">
+          Tem certeza que deseja excluir <strong>{name}</strong> (SKU: {sku})?
+          <br />
+          <span className="text-xs">
+            Esta ação não pode ser desfeita. Produtos com lotes atrelados não podem ser excluídos.
+          </span>
+        </p>
+
+        <div className="flex gap-2">
+          <button
+            onClick={() => setIsOpen(false)}
+            className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={isPending}
+            className={cn(
+              "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+              isPending ? "bg-muted text-muted-foreground" : "bg-destructive text-white hover:opacity-90"
+            )}
+          >
+            {isPending ? "Excluindo..." : "Excluir"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN CLIENT COMPONENT
 // ============================================================
 
@@ -884,7 +1098,17 @@ export function ProductsClient({
                         {formatDate(product.created_at)}
                       </td>
                       <td className="px-5 py-3">
-                        <ToggleActiveButton sku={product.sku} isActive={product.is_active} />
+                        <div className="flex items-center gap-2">
+                          <ToggleActiveButton sku={product.sku} isActive={product.is_active} />
+                          <EditProductButton 
+                            product={product} 
+                            categories={categories}
+                          />
+                          <DeleteProductButton 
+                            sku={product.sku} 
+                            name={product.name}
+                          />
+                        </div>
                       </td>
                     </tr>
                   );

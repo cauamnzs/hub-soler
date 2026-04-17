@@ -126,6 +126,7 @@ export async function getInventoryStock(): Promise<InventoryStockRow[]> {
       qty_purchased,
       qty_lost_seized,
       qty_valid,
+      purchase_price_usd,
       status,
       trip_id,
       products (
@@ -148,6 +149,7 @@ export async function getInventoryStock(): Promise<InventoryStockRow[]> {
       qty_purchased: number;
       qty_lost_seized: number;
       qty_valid: number;
+      purchase_price_usd: number;
       status: InventoryBatch["status"];
       products: {
         sku: string;
@@ -169,8 +171,10 @@ export async function getInventoryStock(): Promise<InventoryStockRow[]> {
       trip_name: r.trips?.name ?? null,
       trip_status: r.trips?.status ?? null,
       qty_purchased: r.qty_purchased,
+      qty_lost: r.qty_lost_seized,  // Alias para compatibilidade com UI
       qty_lost_seized: r.qty_lost_seized,
       qty_valid: r.qty_valid,
+      purchase_price_usd: r.purchase_price_usd,
       batch_status: r.status,
     } satisfies InventoryStockRow;
   });

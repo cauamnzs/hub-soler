@@ -9,11 +9,103 @@ import {
   Calendar,
   DollarSign,
   X,
+  RefreshCw,
 } from "lucide-react";
 import { cn, formatDate } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
 import { createTrip } from "./actions";
 import type { Trip, TripOrigin, TripStatus } from "@/types/database";
+
+// ============================================================
+// BLING SYNC MENU ITEM (for trips list)
+// ============================================================
+
+function BlingSyncMenuItem({ trip }: { trip: Trip }) {
+  const { toast } = useToast();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const isConsolidated = trip.status === "consolidada";
+
+  function handleSync() {
+    startTransition(async () => {
+      console.log("[Bling Sync] Simulação de sincronização iniciada para viagem", {
+        tripId: trip.id,
+        tripName: trip.name,
+      });
+      toast({
+        variant: "success",
+        title: "Simulação de Sincronização iniciada",
+        description: `A viagem "${trip.name}" seria sincronizada com o Bling.`,
+      });
+      setIsOpen(false);
+    });
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => isConsolidated && setIsOpen(true)}
+        disabled={!isConsolidated}
+        title={!isConsolidated ? "Apenas viagens consolidadas podem ser sincronizadas" : "Sincronizar com Bling"}
+        className={
+          isConsolidated
+            ? "inline-flex items-center gap-1 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-400 hover:bg-blue-500/20 transition-colors"
+            : "inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-50 cursor-not-allowed"
+        }
+      >
+        <RefreshCw size={12} />
+        Sincronizar
+      </button>
+
+      {/* Modal de Confirmação */}
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-md animate-fade-in rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="rounded-full bg-blue-500/15 p-2">
+                <RefreshCw size={20} className="text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold">Sincronizar com Bling</h3>
+                <p className="text-xs text-muted-foreground">Confirme os dados antes de prosseguir</p>
+              </div>
+            </div>
+
+            <div className="mb-6 rounded-lg bg-muted/50 p-4">
+              <p className="text-sm text-foreground">
+                Sincronizar a viagem <strong>&quot;{trip.name}&quot;</strong> com o Bling?
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Isso enviará os produtos e atualizará os estoques e preços no Bling.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setIsOpen(false)}
+                className="rounded-lg border border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-muted"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSync}
+                disabled={isPending}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isPending ? "Sincronizando..." : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 // ============================================================
 // BADGES
@@ -405,13 +497,16 @@ export function TripsClient({ initialTrips }: { initialTrips: Trip[] }) {
                       </div>
                     </td>
                     <td className="px-5 py-3.5 text-right">
-                      <Link
-                        href={`/trips/${trip.id}`}
-                        className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-muted hover:text-foreground transition-all"
-                      >
-                        Detalhes
-                        <ArrowUpRight size={12} />
-                      </Link>
+                      <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <BlingSyncMenuItem trip={trip} />
+                        <Link
+                          href={`/trips/${trip.id}`}
+                          className="inline-flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                        >
+                          Detalhes
+                          <ArrowUpRight size={12} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -81,3 +81,100 @@ export async function createInventoryEntry(
   revalidatePath(`/trips/${trip_id}`);
   return { sku };
 }
+
+// ============================================================
+// updateInventoryBatch - Edita quantidade e preço de um lote
+// ============================================================
+
+export type UpdateBatchState = { error: string } | { ok: true };
+
+export async function updateInventoryBatch(
+  batchId: string,
+  formData: FormData,
+): Promise<UpdateBatchState> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Não autenticado." };
+
+  const qty_purchased = parseInt(formData.get("qty_purchased") as string);
+  const qty_lost_seized = parseInt(formData.get("qty_lost_seized") as string) || 0;
+  const purchase_price_usd = parseFloat(formData.get("purchase_price_usd") as string);
+
+  if (isNaN(qty_purchased) || qty_purchased <= 0)
+    return { error: "Quantidade inválida." };
+  if (isNaN(purchase_price_usd) || purchase_price_usd <= 0)
+    return { error: "Preço de compra inválido." };
+  if (qty_lost_seized < 0 || qty_lost_seized > qty_purchased)
+    return { error: "Quantidade avariada inválida." };
+
+  // Busca o lote atual para obter o trip_id
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: batch, error: fetchError } = await (supabase
+    .from("inventory_batches") as any)
+    .select("id, trip_id")
+    .eq("id", batchId)
+    .single();
+
+  if (fetchError || !batch) return { error: "Lote não encontrado." };
+
+  // Atualiza o lote
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase.from("inventory_batches") as any)
+    .update({
+      qty_purchased,
+      qty_lost_seized,
+      purchase_price_usd,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", batchId);
+
+  if (error) return { error: error.message };
+
+  // O trigger recalculate_trip_costs será disparado automaticamente após o update
+  revalidatePath("/inventory");
+  revalidatePath(`/trips/${batch.trip_id}`);
+  return { ok: true };
+}
+
+// ============================================================
+// deleteInventoryBatch - Exclui um lote
+// ============================================================
+
+export type DeleteBatchState = { error: string } | { ok: true };
+
+export async function deleteInventoryBatch(
+  batchId: string
+): Promise<DeleteBatchState> {
+  const supabase = await createClient();
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "Não autenticado." };
+
+  // Busca o lote atual para obter o trip_id antes de excluir
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: batch, error: fetchError } = await (supabase
+    .from("inventory_batches") as any)
+    .select("id, trip_id")
+    .eq("id", batchId)
+    .single();
+
+  if (fetchError || !batch) return { error: "Lote não encontrado." };
+
+  // Exclui o lote
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase.from("inventory_batches") as any)
+    .delete()
+    .eq("id", batchId);
+
+  if (error) return { error: error.message };
+
+  // O trigger recalculate_trip_costs será disparado automaticamente após o delete
+  revalidatePath("/inventory");
+  revalidatePath(`/trips/${batch.trip_id}`);
+  return { ok: true };
+}

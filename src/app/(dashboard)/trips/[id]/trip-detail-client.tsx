@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ChevronDown,
@@ -15,10 +16,13 @@ import {
   CheckCircle2,
   DollarSign,
   Package,
+  RefreshCw,
 } from "lucide-react";
 import { cn, formatBRL } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
-import { updateTripStatus, createExpense } from "../actions";
+import { updateTripStatus, createExpense, updateTrip, deleteTrip, updateExpense, deleteExpense, getProducts, createBatch } from "../actions";
+import { Pencil, Trash2, Settings2, Search, PackagePlus } from "lucide-react";
+import type { ProductCatalogItem } from "../actions";
 import type {
   Trip,
   TripExpense,
@@ -26,6 +30,115 @@ import type {
   ExpenseType,
   BatchWithProduct,
 } from "@/types/database";
+
+// ============================================================
+// BLING SYNC BUTTON
+// ============================================================
+
+function BlingSyncButton({
+  tripId,
+  tripStatus,
+  batches,
+}: {
+  tripId: string;
+  tripStatus: TripStatus;
+  batches: BatchWithProduct[];
+}) {
+  const { toast } = useToast();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isPending, startTransition] = useTransition();
+
+  const isPlanning = tripStatus === "planning";
+  const productCount = batches.length;
+
+  function handleSync() {
+    startTransition(async () => {
+      const batchIds = batches.map((b) => b.id);
+      console.log("[Bling Sync] Simulação de sincronização iniciada", {
+        tripId,
+        batchIds,
+        productCount,
+      });
+      toast({
+        variant: "success",
+        title: "Simulação de Sincronização iniciada",
+        description: `${productCount} produtos seriam sincronizados com o Bling.`,
+      });
+      setIsOpen(false);
+    });
+  }
+
+  return (
+    <>
+      <div className="relative group">
+        <button
+          onClick={() => setIsOpen(true)}
+          disabled={isPlanning}
+          className={
+            isPlanning
+              ? "flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground opacity-50 cursor-not-allowed"
+              : "flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+          }
+        >
+          <RefreshCw size={12} />
+          Sincronizar com Bling
+        </button>
+        {isPlanning && (
+          <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-[11px] text-background shadow-lg">
+            Mude o status para Consolidada antes de sincronizar
+            <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-foreground"></div>
+          </div>
+        )}
+      </div>
+
+      {/* Modal de Confirmação */}
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setIsOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-md animate-fade-in rounded-2xl border border-border bg-card p-6 shadow-2xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="rounded-full bg-blue-500/15 p-2">
+                <RefreshCw size={20} className="text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold">Sincronizar com Bling</h3>
+                <p className="text-xs text-muted-foreground">Confirme os dados antes de prosseguir</p>
+              </div>
+            </div>
+
+            <div className="mb-6 rounded-lg bg-muted/50 p-4">
+              <p className="text-sm text-foreground">
+                Isso enviará <strong>{productCount} produto(s)</strong> para o Bling e atualizará os estoques e preços.
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Deseja continuar?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setIsOpen(false)}
+                className="rounded-lg border border-border px-4 py-2 text-xs font-medium text-muted-foreground hover:bg-muted"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSync}
+                disabled={isPending}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                {isPending ? "Sincronizando..." : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 // ============================================================
 // HELPERS
@@ -303,26 +416,750 @@ function AddExpenseModal({
 }
 
 // ============================================================
+// EDIT TRIP MODAL
+// ============================================================
+
+interface EditTripForm {
+  name: string;
+  estimated_exchange_rate: string;
+  final_exchange_rate: string;
+  notes: string;
+}
+
+function EditTripModal({
+  open,
+  trip,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  trip: Trip;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [isPending, startTransition] = useTransition();
+  const [form, setForm] = useState<EditTripForm>({
+    name: trip.name,
+    estimated_exchange_rate: trip.estimated_exchange_rate.toString(),
+    final_exchange_rate: trip.final_exchange_rate?.toString() || "",
+    notes: trip.notes || "",
+  });
+  const [errors, setErrors] = useState<Partial<EditTripForm>>({});
+
+  function validate(): boolean {
+    const next: Partial<EditTripForm> = {};
+    if (!form.name.trim()) next.name = "Nome obrigatório";
+    const estRate = parseFloat(form.estimated_exchange_rate);
+    if (isNaN(estRate) || estRate <= 0) next.estimated_exchange_rate = "Câmbio inválido";
+    if (form.final_exchange_rate) {
+      const finalRate = parseFloat(form.final_exchange_rate);
+      if (isNaN(finalRate) || finalRate <= 0) next.final_exchange_rate = "Câmbio inválido";
+    }
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  function handleSave() {
+    if (!validate()) return;
+    const fd = new FormData();
+    fd.set("name", form.name.trim());
+    fd.set("estimated_exchange_rate", form.estimated_exchange_rate);
+    if (form.final_exchange_rate) fd.set("final_exchange_rate", form.final_exchange_rate);
+    else fd.set("final_exchange_rate", "");
+    fd.set("notes", form.notes.trim());
+
+    startTransition(async () => {
+      const result = await updateTrip(trip.id, fd);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao atualizar viagem", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Viagem atualizada!", description: "As alterações foram salvas." });
+        onSuccess();
+        onClose();
+      }
+    });
+  }
+
+  function handleClose() {
+    setErrors({});
+    onClose();
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
+      <div className="relative z-10 w-full max-w-md animate-fade-in rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Editar Viagem</h2>
+            <p className="text-xs text-muted-foreground">
+              Altere os dados da viagem e do câmbio.
+            </p>
+          </div>
+          <button onClick={handleClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Name */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Nome da Viagem</label>
+            <input
+              type="text"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className={cn(
+                "w-full rounded-lg border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors",
+                errors.name ? "border-destructive" : "border-border",
+              )}
+            />
+            {errors.name && <p className="mt-1 text-[11px] text-destructive">{errors.name}</p>}
+          </div>
+
+          {/* Exchange Rates */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Câmbio Estimado</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.estimated_exchange_rate}
+                  onChange={(e) => setForm({ ...form, estimated_exchange_rate: e.target.value })}
+                  className={cn(
+                    "w-full rounded-lg border bg-muted/50 py-2 pl-9 pr-3 text-sm outline-none transition-colors",
+                    errors.estimated_exchange_rate ? "border-destructive" : "border-border",
+                  )}
+                />
+              </div>
+              {errors.estimated_exchange_rate && <p className="mt-1 text-[11px] text-destructive">{errors.estimated_exchange_rate}</p>}
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Câmbio Final</label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.final_exchange_rate}
+                  onChange={(e) => setForm({ ...form, final_exchange_rate: e.target.value })}
+                  placeholder="Opcional"
+                  className={cn(
+                    "w-full rounded-lg border bg-muted/50 py-2 pl-9 pr-3 text-sm outline-none transition-colors",
+                    errors.final_exchange_rate ? "border-destructive" : "border-border",
+                  )}
+                />
+              </div>
+              {errors.final_exchange_rate && <p className="mt-1 text-[11px] text-destructive">{errors.final_exchange_rate}</p>}
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Notas</label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={3}
+              className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors"
+            />
+          </div>
+        </div>
+
+        <div className="mt-6 flex gap-2">
+          <button
+            onClick={handleClose}
+            className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isPending}
+            className={cn(
+              "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+              isPending
+                ? "cursor-not-allowed bg-muted text-muted-foreground"
+                : "bg-foreground text-background hover:opacity-90",
+            )}
+          >
+            {isPending ? "Salvando..." : "Salvar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// DELETE TRIP MODAL
+// ============================================================
+
+function DeleteTripModal({
+  open,
+  tripName,
+  onClose,
+  onConfirm,
+  isPending,
+}: {
+  open: boolean;
+  tripName: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  isPending: boolean;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-sm animate-fade-in rounded-2xl border border-destructive/20 bg-card p-6 shadow-2xl">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
+            <AlertTriangle size={20} className="text-destructive" />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-destructive">Excluir Viagem</h2>
+            <p className="text-xs text-muted-foreground">Esta ação não pode ser desfeita.</p>
+          </div>
+        </div>
+
+        <p className="mb-6 text-sm text-muted-foreground">
+          Tem certeza que deseja excluir a viagem <strong className="text-foreground">{tripName}</strong>? 
+          Todas as despesas e lotes vinculados serão removidos permanentemente.
+        </p>
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            disabled={isPending}
+            className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={isPending}
+            className={cn(
+              "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+              isPending
+                ? "cursor-not-allowed bg-destructive/50 text-white"
+                : "bg-destructive text-white hover:opacity-90",
+            )}
+          >
+            {isPending ? "Excluindo..." : "Excluir"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// ADD BATCH MODAL — Combobox searchable para produtos
+// ============================================================
+
+interface BatchFormState {
+  product_sku: string;
+  qty_purchased: string;
+  qty_lost_seized: string;
+  purchase_price_usd: string;
+}
+
+const DEFAULT_BATCH_FORM: BatchFormState = {
+  product_sku: "",
+  qty_purchased: "",
+  qty_lost_seized: "0",
+  purchase_price_usd: "",
+};
+
+function AddBatchModal({
+  open,
+  tripId,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  tripId: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [isPending, startTransition] = useTransition();
+  const [form, setForm] = useState<BatchFormState>(DEFAULT_BATCH_FORM);
+  const [errors, setErrors] = useState<Partial<BatchFormState>>({});
+  
+  // Combobox state
+  const [products, setProducts] = useState<ProductCatalogItem[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<ProductCatalogItem | null>(null);
+  const [showProductList, setShowProductList] = useState(false);
+
+  // Search products when searchTerm changes
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (searchTerm.trim().length >= 2 || searchTerm.trim() === "") {
+        setIsSearching(true);
+        getProducts(searchTerm.trim()).then((data) => {
+          setProducts(data);
+          setIsSearching(false);
+        });
+      }
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchTerm]);
+
+  function validate(): boolean {
+    const next: Partial<BatchFormState> = {};
+    if (!form.product_sku) next.product_sku = "Selecione um produto";
+    if (!form.qty_purchased || parseInt(form.qty_purchased) <= 0) next.qty_purchased = "Quantidade inválida";
+    if (!form.purchase_price_usd || parseFloat(form.purchase_price_usd) <= 0) next.purchase_price_usd = "Preço inválido";
+    const lost = parseInt(form.qty_lost_seized) || 0;
+    const purchased = parseInt(form.qty_purchased) || 0;
+    if (lost > purchased) next.qty_lost_seized = "Não pode ser maior que a quantidade comprada";
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  function handleSelectProduct(product: ProductCatalogItem) {
+    setSelectedProduct(product);
+    setForm({ ...form, product_sku: product.sku });
+    setSearchTerm(`${product.name} (${product.sku})`);
+    setShowProductList(false);
+    setErrors({ ...errors, product_sku: undefined });
+  }
+
+  function handleSubmit() {
+    if (!validate()) return;
+    const fd = new FormData();
+    fd.set("trip_id", tripId);
+    fd.set("product_sku", form.product_sku);
+    fd.set("qty_purchased", form.qty_purchased);
+    fd.set("qty_lost_seized", form.qty_lost_seized);
+    fd.set("purchase_price_usd", form.purchase_price_usd);
+
+    startTransition(async () => {
+      const result = await createBatch(null, fd);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao criar lote", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Lote criado!", description: "Produto vinculado à viagem." });
+        setForm(DEFAULT_BATCH_FORM);
+        setSelectedProduct(null);
+        setSearchTerm("");
+        onSuccess();
+        onClose();
+      }
+    });
+  }
+
+  function handleClose() {
+    setForm(DEFAULT_BATCH_FORM);
+    setSelectedProduct(null);
+    setSearchTerm("");
+    setErrors({});
+    onClose();
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
+      <div className="relative z-10 w-full max-w-md animate-fade-in rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Novo Lote de Produtos</h2>
+            <p className="text-xs text-muted-foreground">
+              Vincule um produto do catálogo a esta viagem.
+            </p>
+          </div>
+          <button onClick={handleClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Product Combobox */}
+          <div className="relative">
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Produto <span className="text-destructive">*</span>
+            </label>
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setShowProductList(true);
+                  if (selectedProduct && e.target.value !== `${selectedProduct.name} (${selectedProduct.sku})`) {
+                    setSelectedProduct(null);
+                    setForm({ ...form, product_sku: "" });
+                  }
+                }}
+                onFocus={() => setShowProductList(true)}
+                placeholder="Buscar por nome, SKU ou marca..."
+                className={cn(
+                  "w-full rounded-lg border bg-muted/50 py-2 pl-9 pr-3 text-sm outline-none transition-colors",
+                  errors.product_sku ? "border-destructive" : "border-border",
+                )}
+              />
+              {isSearching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="h-3 w-3 animate-spin rounded-full border border-muted-foreground border-t-transparent" />
+                </div>
+              )}
+            </div>
+            
+            {errors.product_sku && <p className="mt-1 text-[11px] text-destructive">{errors.product_sku}</p>}
+
+            {/* Product List Dropdown */}
+            {showProductList && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setShowProductList(false)} 
+                />
+                <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card shadow-lg">
+                  <div className="max-h-60 overflow-auto py-1">
+                    {products.length === 0 ? (
+                      <div className="px-3 py-4 text-center">
+                        <p className="text-xs text-muted-foreground">Nenhum produto encontrado</p>
+                        <Link
+                          href="/products"
+                          onClick={() => setShowProductList(false)}
+                          className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-foreground px-3 py-1.5 text-xs font-medium text-background hover:opacity-90"
+                        >
+                          <PackagePlus size={12} />
+                          Cadastrar Novo Produto
+                        </Link>
+                      </div>
+                    ) : (
+                      products.map((product) => (
+                        <button
+                          key={product.sku}
+                          type="button"
+                          onClick={() => handleSelectProduct(product)}
+                          className="w-full px-3 py-2 text-left hover:bg-muted transition-colors"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="text-sm font-medium">{product.name}</p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {product.brand} • {product.model} • {product.variant}
+                              </p>
+                            </div>
+                            <span className="font-mono text-[10px] text-muted-foreground/60">
+                              {product.sku}
+                            </span>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  {products.length > 0 && (
+                    <div className="border-t border-border px-3 py-2">
+                      <Link
+                        href="/products"
+                        onClick={() => setShowProductList(false)}
+                        className="flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                      >
+                        <PackagePlus size={12} />
+                        Cadastrar produto não listado
+                      </Link>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Quantities */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Qtd. Comprada <span className="text-destructive">*</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={form.qty_purchased}
+                onChange={(e) => setForm({ ...form, qty_purchased: e.target.value })}
+                className={cn(
+                  "w-full rounded-lg border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors",
+                  errors.qty_purchased ? "border-destructive" : "border-border",
+                )}
+              />
+              {errors.qty_purchased && <p className="mt-1 text-[11px] text-destructive">{errors.qty_purchased}</p>}
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+                Qtd. Avariada/Apreendida
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={form.qty_lost_seized}
+                onChange={(e) => setForm({ ...form, qty_lost_seized: e.target.value })}
+                className={cn(
+                  "w-full rounded-lg border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors",
+                  errors.qty_lost_seized ? "border-destructive" : "border-border",
+                )}
+              />
+              {errors.qty_lost_seized && <p className="mt-1 text-[11px] text-destructive">{errors.qty_lost_seized}</p>}
+            </div>
+          </div>
+
+          {/* Purchase Price */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Preço de Compra (USD) <span className="text-destructive">*</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">$</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.purchase_price_usd}
+                onChange={(e) => setForm({ ...form, purchase_price_usd: e.target.value })}
+                className={cn(
+                  "w-full rounded-lg border bg-muted/50 py-2 pl-9 pr-3 text-sm outline-none transition-colors",
+                  errors.purchase_price_usd ? "border-destructive" : "border-border",
+                )}
+              />
+            </div>
+            {errors.purchase_price_usd && <p className="mt-1 text-[11px] text-destructive">{errors.purchase_price_usd}</p>}
+          </div>
+        </div>
+
+        <div className="mt-6 flex gap-2">
+          <button
+            onClick={handleClose}
+            className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={isPending}
+            className={cn(
+              "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+              isPending
+                ? "cursor-not-allowed bg-muted text-muted-foreground"
+                : "bg-foreground text-background hover:opacity-90",
+            )}
+          >
+            {isPending ? "Criando..." : "Criar Lote"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditExpenseModal({
+  open,
+  expense,
+  onClose,
+  onSuccess,
+}: {
+  open: boolean;
+  expense: TripExpense | null;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { toast } = useToast();
+  const [isPending, startTransition] = useTransition();
+  const [form, setForm] = useState<ExpenseForm>({
+    description: expense?.description || "",
+    amount_brl: expense ? (expense.amount_brl / 100).toFixed(2) : "",
+    expense_type: expense?.expense_type || "outros",
+  });
+  const [errors, setErrors] = useState<Partial<ExpenseForm>>({});
+
+  // Reset form when expense changes
+  useEffect(() => {
+    if (expense) {
+      setForm({
+        description: expense.description || "",
+        amount_brl: expense.amount_brl.toString(),
+        expense_type: expense.expense_type,
+      });
+    }
+  }, [expense]);
+
+  function validate(): boolean {
+    const next: Partial<ExpenseForm> = {};
+    const val = parseFloat(form.amount_brl);
+    if (!form.amount_brl || isNaN(val) || val <= 0) next.amount_brl = "Valor inválido";
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
+  function handleSave() {
+    if (!expense || !validate()) return;
+    const fd = new FormData();
+    fd.set("trip_id", expense.trip_id);
+    fd.set("description", form.description.trim());
+    fd.set("expense_type", form.expense_type);
+    fd.set("amount_brl", form.amount_brl);
+
+    startTransition(async () => {
+      const result = await updateExpense(expense.id, fd);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao atualizar despesa", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Despesa atualizada!", description: "Custos recalculados automaticamente." });
+        onSuccess();
+        onClose();
+      }
+    });
+  }
+
+  function handleClose() {
+    setErrors({});
+    onClose();
+  }
+
+  if (!open || !expense) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={handleClose} />
+      <div className="relative z-10 w-full max-w-md animate-fade-in rounded-2xl border border-border bg-card p-6 shadow-2xl">
+        <div className="mb-5 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold">Editar Despesa</h2>
+            <p className="text-xs text-muted-foreground">
+              Altere os dados da despesa. O rateio será recalculado.
+            </p>
+          </div>
+          <button onClick={handleClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Tipo */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Tipo de Despesa</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {(Object.keys(EXPENSE_TYPE_LABELS) as ExpenseType[]).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setForm({ ...form, expense_type: type })}
+                  className={cn(
+                    "rounded-lg border py-2 text-xs font-medium transition-colors",
+                    form.expense_type === type
+                      ? cn("border-transparent", EXPENSE_TYPE_COLORS[type])
+                      : "border-border text-muted-foreground hover:bg-muted",
+                  )}
+                >
+                  {EXPENSE_TYPE_LABELS[type]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Descrição */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Descrição</label>
+            <input
+              type="text"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+              className="w-full rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors"
+            />
+          </div>
+
+          {/* Valor */}
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Valor (R$)</label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.amount_brl}
+                onChange={(e) => setForm({ ...form, amount_brl: e.target.value })}
+                className={cn(
+                  "w-full rounded-lg border bg-muted/50 py-2 pl-9 pr-3 text-sm outline-none transition-colors",
+                  errors.amount_brl ? "border-destructive" : "border-border",
+                )}
+              />
+            </div>
+            {errors.amount_brl && <p className="mt-1 text-[11px] text-destructive">{errors.amount_brl}</p>}
+          </div>
+        </div>
+
+        <div className="mt-6 flex gap-2">
+          <button
+            onClick={handleClose}
+            className="flex-1 rounded-lg border border-border py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={isPending}
+            className={cn(
+              "flex-1 rounded-lg py-2 text-sm font-medium transition-opacity",
+              isPending
+                ? "cursor-not-allowed bg-muted text-muted-foreground"
+                : "bg-foreground text-background hover:opacity-90",
+            )}
+          >
+            {isPending ? "Salvando..." : "Salvar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // MAIN CLIENT COMPONENT
 // ============================================================
 
 export function TripDetailClient({
-  trip,
-  expenses,
-  batches,
+  trip: initialTrip,
+  expenses: initialExpenses,
+  batches: initialBatches,
 }: {
   trip: Trip;
   expenses: TripExpense[];
   batches: BatchWithProduct[];
 }) {
+  const [trip, setTrip] = useState<Trip>(initialTrip);
+  const [expenses, setExpenses] = useState<TripExpense[]>(initialExpenses);
+  const [batches] = useState<BatchWithProduct[]>(initialBatches);
+  
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [editTripModalOpen, setEditTripModalOpen] = useState(false);
+  const [deleteTripModalOpen, setDeleteTripModalOpen] = useState(false);
+  const [editExpenseModalOpen, setEditExpenseModalOpen] = useState(false);
+  const [selectedExpense, setSelectedExpense] = useState<TripExpense | null>(null);
+  const [isDeletingTrip, startDeleteTransition] = useTransition();
+  const [isDeletingExpense, startDeleteExpenseTransition] = useTransition();
+  
+  const { toast } = useToast();
+  const router = useRouter();
 
   const exchangeRate = trip.final_exchange_rate ?? trip.estimated_exchange_rate;
 
   // Financial summary — computed from DB values
   const totalExpensesBRL = expenses.reduce((s, e) => s + e.amount_brl, 0);
   const totalProductsBRL = batches.reduce(
-    (s, b) => s + b.purchase_price_usd * exchangeRate,
+    (s, b) => s + b.purchase_price_usd * b.qty_purchased * exchangeRate,
     0,
   );
   const totalInvestedBRL = totalExpensesBRL + totalProductsBRL;
@@ -339,6 +1176,36 @@ export function TripDetailClient({
       ? batchesWithCost.reduce((s, b) => s + (b.products?.base_markup ?? 45), 0) /
         batchesWithCost.length
       : 0;
+
+  // Handlers
+  function handleDeleteTrip() {
+    startDeleteTransition(async () => {
+      const result = await deleteTrip(trip.id);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao excluir", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Viagem excluída!" });
+        router.push("/trips");
+      }
+    });
+  }
+
+  function handleDeleteExpense(expenseId: string) {
+    startDeleteExpenseTransition(async () => {
+      const result = await deleteExpense(expenseId, trip.id);
+      if ("error" in result) {
+        toast({ variant: "error", title: "Erro ao excluir", description: result.error });
+      } else {
+        toast({ variant: "success", title: "Despesa removida!", description: "Custos recalculados." });
+        setExpenses(expenses.filter((e) => e.id !== expenseId));
+      }
+    });
+  }
+
+  function handleEditExpense(expense: TripExpense) {
+    setSelectedExpense(expense);
+    setEditExpenseModalOpen(true);
+  }
 
   return (
     <>
@@ -367,6 +1234,29 @@ export function TripDetailClient({
             >
               {trip.origin === "EUA" ? "🇺🇸" : "🇵🇾"} {trip.origin}
             </span>
+            
+            {/* Bling Sync + Edit/Delete buttons */}
+            <div className="ml-auto flex items-center gap-2">
+              <BlingSyncButton
+                tripId={trip.id}
+                tripStatus={trip.status}
+                batches={batches}
+              />
+              <button
+                onClick={() => setEditTripModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-muted"
+              >
+                <Settings2 size={12} />
+                Editar
+              </button>
+              <button
+                onClick={() => setDeleteTripModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-destructive/30 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
+              >
+                <Trash2 size={12} />
+                Excluir
+              </button>
+            </div>
           </div>
           {trip.notes && (
             <p className="mt-1 text-sm text-muted-foreground">{trip.notes}</p>
@@ -467,7 +1357,7 @@ export function TripDetailClient({
               ) : (
                 <div className="divide-y divide-border/50">
                   {expenses.map((exp) => (
-                    <div key={exp.id} className="flex items-center gap-3 px-5 py-3.5">
+                    <div key={exp.id} className="flex items-center gap-3 px-5 py-3.5 group">
                       <span
                         className={cn(
                           "rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase",
@@ -485,6 +1375,25 @@ export function TripDetailClient({
                       <span className="shrink-0 tabular-nums text-sm font-semibold">
                         {formatBRL(exp.amount_brl)}
                       </span>
+                      
+                      {/* Edit/Delete icons */}
+                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button
+                          onClick={() => handleEditExpense(exp)}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                          title="Editar despesa"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteExpense(exp.id)}
+                          disabled={isDeletingExpense}
+                          className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                          title="Excluir despesa"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -743,6 +1652,37 @@ export function TripDetailClient({
         open={expenseModalOpen}
         tripId={trip.id}
         onClose={() => setExpenseModalOpen(false)}
+      />
+
+      <EditTripModal
+        open={editTripModalOpen}
+        trip={trip}
+        onClose={() => setEditTripModalOpen(false)}
+        onSuccess={() => {
+          // Refresh trip data from server
+          window.location.reload();
+        }}
+      />
+
+      <DeleteTripModal
+        open={deleteTripModalOpen}
+        tripName={trip.name}
+        onClose={() => setDeleteTripModalOpen(false)}
+        onConfirm={handleDeleteTrip}
+        isPending={isDeletingTrip}
+      />
+
+      <EditExpenseModal
+        open={editExpenseModalOpen}
+        expense={selectedExpense}
+        onClose={() => {
+          setEditExpenseModalOpen(false);
+          setSelectedExpense(null);
+        }}
+        onSuccess={() => {
+          // Refresh expenses from server
+          window.location.reload();
+        }}
       />
     </>
   );
