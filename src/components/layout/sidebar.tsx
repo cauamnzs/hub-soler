@@ -222,7 +222,7 @@ export function Sidebar() {
           {!collapsed && (
             <div className="flex flex-1 flex-col overflow-hidden">
               <span className="truncate text-xs font-medium text-sidebar-foreground">
-                Rafael Soler
+                Cauã
               </span>
               <span className="truncate text-[10px] text-sidebar-foreground/40">
                 admin
