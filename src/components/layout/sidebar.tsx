@@ -15,8 +15,9 @@ import {
   Zap,
   LogOut,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { logoutAction } from "@/app/login/actions";
+import { createClient } from "@/lib/supabase/client";
 
 interface NavItem {
   label: string;
@@ -24,6 +25,57 @@ interface NavItem {
   icon: React.ReactNode;
   roles: string[];
   badge?: string;
+}
+
+// Hook to fetch user profile data
+function useUserProfile() {
+  const [user, setUser] = useState<{ fullName: string; initials: string } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchUser() {
+      try {
+        const supabase = createClient();
+        
+        // Get current session
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (!session?.user) {
+          setUser({ fullName: "Usuário", initials: "U" });
+          setLoading(false);
+          return;
+        }
+
+        // Fetch profile from public.profiles table
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name")
+          .eq("id", session.user.id)
+          .single();
+
+        const fullName = (profile as { full_name?: string } | null)?.full_name || session.user.email?.split("@")[0] || "Usuário";
+        
+        // Generate initials from full name
+        const initials = fullName
+          .split(" ")
+          .map((n: string) => n[0])
+          .join("")
+          .toUpperCase()
+          .slice(0, 2);
+
+        setUser({ fullName, initials });
+      } catch (err) {
+        console.error("[Sidebar] Error fetching user:", err);
+        setUser({ fullName: "Usuário", initials: "U" });
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchUser();
+  }, []);
+
+  return { user, loading };
 }
 
 const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
@@ -209,29 +261,42 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="border-t border-sidebar-border p-3">
-        <div
-          className={cn(
-            "flex items-center gap-2.5 rounded-lg px-2.5 py-2",
-            collapsed && "justify-center px-0",
-          )}
-        >
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-xs font-bold text-white">
-            RS
-          </div>
-          {!collapsed && (
-            <div className="flex flex-1 flex-col overflow-hidden">
-              <span className="truncate text-xs font-medium text-sidebar-foreground">
-                Cauã
-              </span>
-              <span className="truncate text-[10px] text-sidebar-foreground/40">
-                admin
-              </span>
-            </div>
-          )}
-          <LogoutButton collapsed={collapsed} />
-        </div>
-      </div>
+      <SidebarFooter collapsed={collapsed} />
     </aside>
+  );
+}
+
+// Sidebar Footer Component with dynamic user data
+function SidebarFooter({ collapsed }: { collapsed: boolean }) {
+  const { user, loading } = useUserProfile();
+
+  return (
+    <div className="border-t border-sidebar-border p-3">
+      <div
+        className={cn(
+          "flex items-center gap-2.5 rounded-lg px-2.5 py-2",
+          collapsed && "justify-center px-0",
+        )}
+      >
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-xs font-bold text-white">
+          {loading ? (
+            <span className="animate-pulse">••</span>
+          ) : (
+            user?.initials || "U"
+          )}
+        </div>
+        {!collapsed && (
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <span className="truncate text-xs font-medium text-sidebar-foreground">
+              {loading ? "Carregando..." : user?.fullName || "Usuário"}
+            </span>
+            <span className="truncate text-[10px] text-sidebar-foreground/40">
+              admin
+            </span>
+          </div>
+        )}
+        <LogoutButton collapsed={collapsed} />
+      </div>
+    </div>
   );
 }
