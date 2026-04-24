@@ -22,44 +22,47 @@ export async function createInventoryEntry(
   } = await supabase.auth.getUser();
   if (!user) return { error: "Não autenticado." };
 
-  const category_id = formData.get("category_id") as string;
-  const name = (formData.get("name") as string)?.trim();
-  const model = (formData.get("model") as string)?.trim();
-  const variant = (formData.get("variant") as string)?.trim();
+  const provided_sku = (formData.get("product_sku") as string)?.trim();
   const trip_id = formData.get("trip_id") as string;
   const qty_purchased = parseInt(formData.get("qty_purchased") as string);
   const qty_lost_seized = parseInt(formData.get("qty_lost_seized") as string) || 0;
   const purchase_price_usd = parseFloat(formData.get("purchase_price_usd") as string) || 0;
 
-  if (!category_id || !name || !model || !variant || !trip_id)
-    return { error: "Campos obrigatórios ausentes." };
+  if (!trip_id) return { error: "Selecione uma viagem." };
   if (isNaN(qty_purchased) || qty_purchased <= 0)
     return { error: "Quantidade inválida." };
   if (qty_lost_seized < 0 || qty_lost_seized > qty_purchased)
     return { error: "Quantidade avariada inválida." };
 
-  // ---- Upsert product (insert if SKU doesn't exist yet) ----
-  const productPayload: ProductInsert = {
-    name,
-    model,
-    variant,
-    category_id,
-    base_markup: 45,
-    is_active: true,
-    brand: null,
-    weight_kg: null,
-  };
+  let sku: string;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const productQb = supabase.from("products") as any;
-  const { data: productData, error: productError } = await productQb
-    .insert(productPayload)
-    .select("sku")
-    .single();
-
-  if (productError) return { error: productError.message };
-
-  const sku = (productData as { sku: string }).sku;
+  if (provided_sku) {
+    // ---- Fast path: produto já cadastrado, apenas verificar existência ----
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: existing, error: findError } = await (supabase.from("products") as any)
+      .select("sku")
+      .eq("sku", provided_sku)
+      .single();
+    if (findError || !existing) return { error: "Produto não encontrado. Verifique o SKU." };
+    sku = provided_sku;
+  } else {
+    // ---- Fallback: inserir novo produto (compatibilidade) ----
+    const category_id = formData.get("category_id") as string;
+    const name = (formData.get("name") as string)?.trim();
+    const model = (formData.get("model") as string)?.trim();
+    const variant = (formData.get("variant") as string)?.trim();
+    if (!category_id || !name || !model || !variant)
+      return { error: "Campos obrigatórios ausentes." };
+    const productPayload: ProductInsert = {
+      name, model, variant, category_id,
+      base_markup: 45, is_active: true, brand: null, weight_kg: null,
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: productData, error: productError } = await (supabase.from("products") as any)
+      .insert(productPayload).select("sku").single();
+    if (productError) return { error: productError.message };
+    sku = (productData as { sku: string }).sku;
+  }
 
   // ---- Create inventory batch ----
   const batchPayload: InventoryBatchInsert = {

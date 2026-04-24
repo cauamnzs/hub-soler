@@ -1,11 +1,12 @@
-﻿import { getInventoryStock, getCategories, getTrips } from "@/lib/supabase/queries";
+﻿import { getInventoryStock, getCategories, getTrips, getProducts } from "@/lib/supabase/queries";
 import { InventoryClient } from "./inventory-client";
 
 export default async function InventoryPage() {
-  const [rows, categories, trips] = await Promise.all([
+  const [rows, categories, trips, products] = await Promise.all([
     getInventoryStock(),
     getCategories(),
     getTrips(),
+    getProducts(),
   ]);
 
   const activeTrips = trips.filter((t) => t.status !== "consolidada");
@@ -15,6 +16,7 @@ export default async function InventoryPage() {
       initialRows={rows}
       categories={categories}
       activeTrips={activeTrips}
+      products={products}
     />
   );
 }

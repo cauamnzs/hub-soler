@@ -10,15 +10,13 @@ import {
   ChevronDown,
   ChevronsUpDown,
   Package,
-  Tag,
   Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { buildSkuPreview } from "@/lib/sku";
 import { useToast } from "@/components/ui/toast";
 import { createInventoryEntry, updateInventoryBatch, deleteInventoryBatch } from "./actions";
 import { Pencil, Trash2 } from "lucide-react";
-import type { Category, Trip, InventoryStockRow } from "@/types/database";
+import type { Category, Trip, InventoryStockRow, ProductWithCategory } from "@/types/database";
 
 // ============================================================
 // HELPERS / SUB-COMPONENTS
@@ -321,10 +319,7 @@ function SortHeader({
 // ============================================================
 
 interface EntryForm {
-  category_id: string;
-  name: string;
-  model: string;
-  variant: string;
+  product_sku: string;
   trip_id: string;
   qty_purchased: string;
   qty_lost_seized: string;
@@ -332,41 +327,56 @@ interface EntryForm {
 }
 
 const DEFAULT_FORM: EntryForm = {
-  category_id: "",
-  name: "",
-  model: "",
-  variant: "",
+  product_sku: "",
   trip_id: "",
   qty_purchased: "",
   qty_lost_seized: "0",
   purchase_price_usd: "0",
 };
 
+const ENTRY_CAT_EMOJI: Record<string, string> = {
+  PERF: "🦴", COSM: "💄", ELET: "📱", SUPL: "💊", VEST: "👗", OUTR: "📦",
+};
+const ENTRY_CAT_GRADIENT: Record<string, string> = {
+  PERF: "from-violet-500 to-violet-900",
+  COSM: "from-pink-500 to-pink-900",
+  ELET: "from-blue-500 to-blue-900",
+  SUPL: "from-emerald-500 to-emerald-900",
+  VEST: "from-amber-500 to-amber-900",
+  OUTR: "from-zinc-500 to-zinc-900",
+};
+
 function NewEntryModal({
   open,
-  categories,
   activeTrips,
-  existingSkus,
+  products,
   onClose,
 }: {
   open: boolean;
-  categories: Category[];
   activeTrips: Trip[];
-  existingSkus: Set<string>;
+  products: ProductWithCategory[];
   onClose: () => void;
 }) {
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [form, setForm] = useState<EntryForm>(DEFAULT_FORM);
   const [errors, setErrors] = useState<Partial<EntryForm>>({});
+  const [productSearch, setProductSearch] = useState("");
 
-  const selectedCategory = categories.find((c) => c.id === form.category_id);
-  const skuPreview = buildSkuPreview(
-    selectedCategory?.code ?? "",
-    form.model,
-    form.variant,
-  );
-  const skuCollision = existingSkus.has(skuPreview) && !skuPreview.includes("?");
+  const selectedProduct = products.find((p) => p.sku === form.product_sku);
+
+  const filteredProducts = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    if (!q) return products.slice(0, 8);
+    return products
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.sku.toLowerCase().includes(q) ||
+          (p.brand ?? "").toLowerCase().includes(q),
+      )
+      .slice(0, 8);
+  }, [products, productSearch]);
 
   function set<K extends keyof EntryForm>(key: K, value: EntryForm[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -375,10 +385,7 @@ function NewEntryModal({
 
   function validate(): boolean {
     const next: Partial<EntryForm> = {};
-    if (!form.category_id) next.category_id = "Selecione uma categoria";
-    if (!form.name.trim()) next.name = "Nome obrigatório";
-    if (!form.model.trim()) next.model = "Modelo obrigatório";
-    if (!form.variant.trim()) next.variant = "Variante obrigatória";
+    if (!form.product_sku) next.product_sku = "Selecione um produto";
     if (!form.trip_id) next.trip_id = "Selecione uma viagem";
     const qty = parseInt(form.qty_purchased);
     if (!form.qty_purchased || isNaN(qty) || qty <= 0)
@@ -392,12 +399,9 @@ function NewEntryModal({
   }
 
   function handleSave() {
-    if (!validate() || skuCollision) return;
+    if (!validate()) return;
     const fd = new FormData();
-    fd.set("category_id", form.category_id);
-    fd.set("name", form.name.trim());
-    fd.set("model", form.model.trim());
-    fd.set("variant", form.variant.trim());
+    fd.set("product_sku", form.product_sku);
     fd.set("trip_id", form.trip_id);
     fd.set("qty_purchased", form.qty_purchased);
     fd.set("qty_lost_seized", form.qty_lost_seized || "0");
@@ -411,6 +415,7 @@ function NewEntryModal({
         toast({ variant: "success", title: "Entrada registrada!", description: `SKU: ${result.sku}` });
         setForm(DEFAULT_FORM);
         setErrors({});
+        setProductSearch("");
         onClose();
       }
     });
@@ -419,10 +424,13 @@ function NewEntryModal({
   function handleClose() {
     setForm(DEFAULT_FORM);
     setErrors({});
+    setProductSearch("");
     onClose();
   }
 
   if (!open) return null;
+
+  const catCode = selectedProduct?.categories?.code ?? "OUTR";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -433,7 +441,7 @@ function NewEntryModal({
           <div>
             <h2 className="text-base font-semibold">Nova Entrada de Estoque</h2>
             <p className="text-xs text-muted-foreground">
-              O SKU é gerado automaticamente com base nos dados abaixo.
+              Selecione um produto cadastrado e configure o lote.
             </p>
           </div>
           <button onClick={handleClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
@@ -443,128 +451,91 @@ function NewEntryModal({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
-          {/* SKU Preview */}
-          <div
-            className={cn(
-              "rounded-xl border px-4 py-3 transition-colors",
-              skuCollision
-                ? "border-destructive/50 bg-destructive/5"
-                : skuPreview.includes("?")
-                  ? "border-border bg-muted/30"
-                  : "border-emerald-500/30 bg-emerald-500/5",
-            )}
-          >
-            <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-              SKU Gerado (Preview)
-            </p>
-            <p
-              className={cn(
-                "font-mono text-xl font-black tracking-wider",
-                skuCollision
-                  ? "text-destructive"
-                  : skuPreview.includes("?")
-                    ? "text-muted-foreground/40"
-                    : "text-emerald-400",
-              )}
-            >
-              {skuPreview}
-            </p>
-            {skuCollision && (
-              <p className="mt-1 text-[11px] text-destructive">
-                Este SKU já existe. Ajuste o Modelo ou Variante.
-              </p>
-            )}
-          </div>
 
-          {/* Categoria */}
+          {/* Product Search / Selected */}
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-              <span className="flex items-center gap-1.5"><Tag size={11} />Categoria</span>
+            <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Package size={11} /> Produto
             </label>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {categories.map((cat) => {
-                const colorMap: Record<string, string> = {
-                  PERF: "border-violet-500/40 bg-violet-500/10 text-violet-400",
-                  COSM: "border-pink-500/40 bg-pink-500/10 text-pink-400",
-                  ELET: "border-blue-500/40 bg-blue-500/10 text-blue-400",
-                  SUPL: "border-emerald-500/40 bg-emerald-500/10 text-emerald-400",
-                  VEST: "border-amber-500/40 bg-amber-500/10 text-amber-400",
-                  OUTR: "border-border bg-muted text-muted-foreground",
-                };
-                const isSelected = form.category_id === cat.id;
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => set("category_id", cat.id)}
-                    className={cn(
-                      "rounded-lg border py-2.5 text-xs font-semibold transition-colors",
-                      isSelected
-                        ? colorMap[cat.code] ?? "border-border bg-muted"
-                        : "border-border text-muted-foreground hover:bg-muted",
+            {selectedProduct ? (
+              <div className="flex items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3">
+                <div className={cn(
+                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xl",
+                  ENTRY_CAT_GRADIENT[catCode] ?? "from-zinc-500 to-zinc-900",
+                )}>
+                  {ENTRY_CAT_EMOJI[catCode] ?? "📦"}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{selectedProduct.name}</p>
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {selectedProduct.sku}
+                    {selectedProduct.brand && (
+                      <span className="ml-2 font-sans text-muted-foreground/60">· {selectedProduct.brand}</span>
                     )}
-                  >
-                    {cat.name}
-                    <span className="ml-1 font-mono opacity-50">[{cat.code}]</span>
-                  </button>
-                );
-              })}
-            </div>
-            {errors.category_id && (
-              <p className="mt-1 text-[11px] text-destructive">{errors.category_id}</p>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { set("product_sku", ""); setProductSearch(""); }}
+                  className="shrink-0 rounded-lg px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted"
+                >
+                  Trocar
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    placeholder="Buscar SKU, nome ou marca..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="w-full rounded-xl border border-border bg-muted/50 py-2 pl-9 pr-3 text-sm outline-none transition-colors focus:border-primary focus:bg-background"
+                  />
+                </div>
+                {products.length === 0 ? (
+                  <p className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+                    Nenhum produto cadastrado. Vá em{" "}
+                    <span className="text-blue-400">Produtos</span> para criar primeiro.
+                  </p>
+                ) : filteredProducts.length === 0 ? (
+                  <p className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+                    Nenhum produto encontrado.
+                  </p>
+                ) : (
+                  <div className="space-y-1 rounded-xl border border-border bg-muted/10 p-1.5">
+                    {filteredProducts.map((p) => (
+                      <button
+                        key={p.sku}
+                        type="button"
+                        onClick={() => set("product_sku", p.sku)}
+                        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted"
+                      >
+                        <div className={cn(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-base",
+                          ENTRY_CAT_GRADIENT[p.categories?.code ?? "OUTR"] ?? "from-zinc-500 to-zinc-900",
+                        )}>
+                          {ENTRY_CAT_EMOJI[p.categories?.code ?? "OUTR"] ?? "📦"}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{p.name}</p>
+                          <p className="font-mono text-[10px] text-muted-foreground">
+                            {p.sku}
+                            {p.brand && (
+                              <span className="ml-2 font-sans text-muted-foreground/50">· {p.brand}</span>
+                            )}
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
-          </div>
-
-          {/* Nome / Modelo / Variante */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Nome do Produto</label>
-              <input
-                type="text"
-                placeholder="ex: Dior Sauvage EDP"
-                value={form.name}
-                onChange={(e) => set("name", e.target.value)}
-                className={cn(
-                  "w-full rounded-lg border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary focus:bg-background",
-                  errors.name ? "border-destructive" : "border-border",
-                )}
-              />
-              {errors.name && <p className="mt-1 text-[11px] text-destructive">{errors.name}</p>}
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                Modelo <span className="text-muted-foreground/50">(4 chars → SKU)</span>
-              </label>
-              <input
-                type="text"
-                placeholder="ex: Sauvage"
-                value={form.model}
-                maxLength={20}
-                onChange={(e) => set("model", e.target.value)}
-                className={cn(
-                  "w-full rounded-lg border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary focus:bg-background",
-                  errors.model ? "border-destructive" : "border-border",
-                )}
-              />
-              {errors.model && <p className="mt-1 text-[11px] text-destructive">{errors.model}</p>}
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                Variante <span className="text-muted-foreground/50">(3 chars → SKU)</span>
-              </label>
-              <input
-                type="text"
-                placeholder="ex: 60ml"
-                value={form.variant}
-                maxLength={20}
-                onChange={(e) => set("variant", e.target.value)}
-                className={cn(
-                  "w-full rounded-lg border bg-muted/50 px-3 py-2 text-sm outline-none transition-colors placeholder:text-muted-foreground/40 focus:border-primary focus:bg-background",
-                  errors.variant ? "border-destructive" : "border-border",
-                )}
-              />
-              {errors.variant && <p className="mt-1 text-[11px] text-destructive">{errors.variant}</p>}
-            </div>
+            {errors.product_sku && (
+              <p className="mt-1 text-[11px] text-destructive">{errors.product_sku}</p>
+            )}
           </div>
 
           {/* Preço de compra USD */}
@@ -691,10 +662,10 @@ function NewEntryModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={skuCollision || isPending}
+              disabled={isPending}
               className={cn(
                 "flex-1 rounded-lg py-2.5 text-sm font-semibold transition-opacity",
-                skuCollision || isPending
+                isPending
                   ? "cursor-not-allowed bg-muted text-muted-foreground"
                   : "bg-foreground text-background hover:opacity-90",
               )}
@@ -716,10 +687,12 @@ export function InventoryClient({
   initialRows,
   categories,
   activeTrips,
+  products,
 }: {
   initialRows: InventoryStockRow[];
   categories: Category[];
   activeTrips: Trip[];
+  products: ProductWithCategory[];
 }) {
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
@@ -727,7 +700,6 @@ export function InventoryClient({
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [modalOpen, setModalOpen] = useState(false);
 
-  const existingSkus = useMemo(() => new Set(initialRows.map((r) => r.sku)), [initialRows]);
 
   const displayRows = useMemo(() => {
     let result = initialRows.filter((r) => {
@@ -953,9 +925,8 @@ export function InventoryClient({
 
       <NewEntryModal
         open={modalOpen}
-        categories={categories}
         activeTrips={activeTrips}
-        existingSkus={existingSkus}
+        products={products}
         onClose={() => setModalOpen(false)}
       />
     </>

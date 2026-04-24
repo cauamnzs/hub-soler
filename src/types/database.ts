@@ -117,6 +117,21 @@ export interface ExpressSale {
   created_at: string;
 }
 
+export interface CatalogProduct {
+  sku: string;
+  name: string;
+  brand: string;
+  price: number;
+  image_url: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CatalogProductInsert = Omit<CatalogProduct, "created_at" | "updated_at">;
+export type CatalogProductUpdate = Partial<Omit<CatalogProduct, "sku" | "created_at" | "updated_at">>;
+
 export interface BlingToken {
   id: number;
   access_token: string;
@@ -253,6 +268,12 @@ export interface Database {
         Row: ExpressSale;
         Insert: ExpressSaleInsert;
         Update: Partial<ExpressSaleInsert>;
+        Relationships: [];
+      };
+      catalog_products: {
+        Row: CatalogProduct;
+        Insert: CatalogProductInsert;
+        Update: CatalogProductUpdate;
         Relationships: [];
       };
       bling_tokens: {
