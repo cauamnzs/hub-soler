@@ -12,7 +12,6 @@ import {
   MessageSquare,
   Settings,
   ChevronLeft,
-  Zap,
   LogOut,
 } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -129,12 +128,6 @@ const NAV_SECTIONS: { title: string; items: NavItem[] }[] = [
   {
     title: "Sistema",
     items: [
-      {
-        label: "Integrações",
-        href: "/integrations",
-        icon: <Zap size={18} />,
-        roles: ["admin"],
-      },
       {
         label: "Configurações",
         href: "/settings",

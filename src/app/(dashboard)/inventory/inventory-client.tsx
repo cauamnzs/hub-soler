@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition, useEffect } from "react";
 import {
   Boxes,
   Plus,
@@ -357,6 +357,19 @@ function NewEntryModal({
   products: ProductWithCategory[];
   onClose: () => void;
 }) {
+  // Debug: log data availability when modal opens
+  useEffect(() => {
+    if (open) {
+      // eslint-disable-next-line no-console
+      console.log("[NewEntryModal] Modal opened with data:", {
+        activeTripsCount: activeTrips?.length ?? 0,
+        productsCount: products?.length ?? 0,
+        activeTrips: activeTrips?.map(t => ({ id: t.id, name: t.name, origin: t.origin, status: t.status })),
+        firstFewProducts: products?.slice(0, 3).map(p => ({ sku: p.sku, name: p.name, category: p.categories?.name })),
+      });
+    }
+  }, [open, activeTrips, products]);
+
   const { toast } = useToast();
   const [isPending, startTransition] = useTransition();
   const [form, setForm] = useState<EntryForm>(DEFAULT_FORM);
@@ -495,10 +508,15 @@ function NewEntryModal({
                   />
                 </div>
                 {products.length === 0 ? (
-                  <p className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-                    Nenhum produto cadastrado. Vá em{" "}
-                    <span className="text-blue-400">Produtos</span> para criar primeiro.
-                  </p>
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                    <p className="flex items-center gap-2 text-xs text-amber-500">
+                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                      <strong>Nenhum produto cadastrado no ERP.</strong>
+                    </p>
+                    <p className="mt-1 text-[11px] text-amber-500/70">
+                      Cadastre produtos em <span className="font-semibold">Produtos</span> antes de dar entrada no estoque.
+                    </p>
+                  </div>
                 ) : filteredProducts.length === 0 ? (
                   <p className="rounded-xl border border-border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
                     Nenhum produto encontrado.
@@ -563,9 +581,15 @@ function NewEntryModal({
               <span className="flex items-center gap-1.5"><Layers size={11} />Viagem de Origem</span>
             </label>
             {activeTrips.length === 0 ? (
-              <p className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-                Nenhuma viagem ativa. Crie uma em <span className="text-blue-400">Viagens</span>.
-              </p>
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                <p className="flex items-center gap-2 text-xs text-amber-500">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                  <strong>Nenhuma viagem ativa disponível.</strong>
+                </p>
+                <p className="mt-1 text-[11px] text-amber-500/70">
+                  Crie uma viagem em <span className="font-semibold">Viagens</span> ou verifique se as viagens existentes não estão consolidadas.
+                </p>
+              </div>
             ) : (
               <div className="space-y-1.5">
                 {activeTrips.map((trip) => (
@@ -694,6 +718,19 @@ export function InventoryClient({
   activeTrips: Trip[];
   products: ProductWithCategory[];
 }) {
+  // Debug: log props received
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log("[InventoryClient] Props received:", {
+      initialRowsCount: initialRows?.length ?? 0,
+      categoriesCount: categories?.length ?? 0,
+      activeTripsCount: activeTrips?.length ?? 0,
+      productsCount: products?.length ?? 0,
+      activeTripsDetails: activeTrips?.slice(0, 3).map(t => ({ id: t.id, name: t.name, origin: t.origin })),
+      productsDetails: products?.slice(0, 3).map(p => ({ sku: p.sku, name: p.name })),
+    });
+  }, [initialRows, categories, activeTrips, products]);
+
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState<string>("all");
   const [sortKey, setSortKey] = useState<SortKey>("name");

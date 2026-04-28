@@ -12,6 +12,9 @@ import {
   Database,
   Save,
   Check,
+  AlertTriangle,
+  DollarSign,
+  Percent,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -19,7 +22,7 @@ import { cn } from "@/lib/utils";
 // TABS PRIMITIVE (inline — no shadcn install needed)
 // ============================================================
 
-type TabId = "integrations" | "rules";
+type TabId = "rules" | "connections";
 
 function TabBar({
   active,
@@ -29,8 +32,8 @@ function TabBar({
   onChange: (t: TabId) => void;
 }) {
   const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
-    { id: "integrations", label: "Integrações", icon: <Plug size={14} /> },
     { id: "rules", label: "Regras de Negócio", icon: <SlidersHorizontal size={14} /> },
+    { id: "connections", label: "Conexões & APIs", icon: <Plug size={14} /> },
   ];
 
   return (
@@ -211,9 +214,17 @@ function StatusPill({ status }: { status: ConnectionStatus }) {
   );
 }
 
-function IntegrationsTab() {
+function ConnectionsTab() {
   return (
     <div className="space-y-4">
+      {/* Warning Banner */}
+      <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+        <p className="flex items-center gap-2 text-xs text-amber-500">
+          <AlertTriangle size={14} />
+          <strong>Área técnica.</strong> Alterações aqui podem interromper o funcionamento do sistema.
+        </p>
+      </div>
+
       <BlingCard />
       <SupabaseCard />
     </div>
@@ -255,6 +266,65 @@ function RulesTab() {
 
   return (
     <div className="space-y-4">
+
+      {/* Quick Settings Cards */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {/* Dollar Exchange Rate Card */}
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10">
+              <DollarSign size={18} className="text-emerald-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold">Cotação do Dólar</h3>
+              <p className="text-[11px] text-muted-foreground">Taxa de câmbio de referência</p>
+            </div>
+          </div>
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">R$</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              placeholder="5.00"
+              defaultValue="5.15"
+              className="w-full rounded-xl border border-border bg-muted/50 py-2.5 pl-8 pr-10 text-sm font-semibold outline-none transition-colors focus:border-primary focus:bg-background"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">/USD</span>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground/60">
+            Usada como base para cálculos de custo em viagens
+          </p>
+        </div>
+
+        {/* Default Profit Margin Card */}
+        <div className="rounded-xl border border-border bg-card p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10">
+              <Percent size={18} className="text-blue-400" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold">Margem de Lucro Padrão</h3>
+              <p className="text-[11px] text-muted-foreground">Markup mínimo sugerido</p>
+            </div>
+          </div>
+          <div className="relative">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              max="200"
+              placeholder="45"
+              defaultValue="45"
+              className="w-full rounded-xl border border-border bg-muted/50 py-2.5 pl-3.5 pr-10 text-sm font-semibold outline-none transition-colors focus:border-primary focus:bg-background"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">%</span>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground/60">
+            Aplicada automaticamente a novos produtos cadastrados
+          </p>
+        </div>
+      </div>
 
       {/* Numeric settings */}
       <div className="rounded-xl border border-border bg-card p-6">
@@ -360,7 +430,7 @@ function RulesTab() {
 // ============================================================
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<TabId>("integrations");
+  const [activeTab, setActiveTab] = useState<TabId>("rules");
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 animate-fade-in">
@@ -369,7 +439,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Configurações</h1>
         <p className="text-sm text-muted-foreground">
-          Integrações e regras de negócio do Hub Soler
+          Regras de negócio e conexões técnicas do Hub Soler
         </p>
       </div>
 
@@ -377,8 +447,8 @@ export default function SettingsPage() {
       <TabBar active={activeTab} onChange={setActiveTab} />
 
       {/* Tab content */}
-      {activeTab === "integrations" && <IntegrationsTab />}
       {activeTab === "rules" && <RulesTab />}
+      {activeTab === "connections" && <ConnectionsTab />}
     </div>
   );
 }
