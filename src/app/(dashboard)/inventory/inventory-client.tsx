@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/ui/toast";
+import { PublishWebButton } from "@/components/publish-web-button";
 import { createInventoryEntry, updateInventoryBatch, deleteInventoryBatch } from "./actions";
 import { Pencil, Trash2 } from "lucide-react";
 import type { Category, Trip, InventoryStockRow, ProductWithCategory } from "@/types/database";
@@ -929,6 +930,10 @@ export function InventoryClient({
                     </td>
                     <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-1">
+                        <PublishWebButton
+                          item={{ sku: row.sku, name: row.name, brand: row.brand }}
+                          categoryCode={row.category_code}
+                        />
                         <EditBatchButton row={row} />
                         <DeleteBatchButton row={row} />
                       </div>
